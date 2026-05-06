@@ -1,0 +1,36 @@
+name: lagmonitor
+description: $description
+version: '${version}'
+
+main: uk.ravenflight.lagmonitor.Lagmonitor
+api-version: '26.1.2'
+load: POSTWORLD
+
+authors: [ LittleBobTables ]
+
+commands:
+  lagmonitor:
+    description: Main command for Lagmonitor
+    usage: /lagmonitor <reload|scan|clear>
+
+permissions:
+  lagmonitor.notify:
+    description: Allows receiving notifications from Lagmonitor
+    default: op
+  lagmonitor.reload:
+    description: Allows reloading the Lagmonitor configuration
+    default: op
+  lagmonitor.clear:
+    description: Allows the manual removal of excessive entities.
+    default: op
+  lagmonitor.scan:
+    description: Allows areas to be manually scanned for excessive entities.
+    default: op
+  lagmonitor.admin:
+    description: Full administrative access to Lagmonitor
+    default: op
+    children:
+      lagmonitor.notify: true
+      lagmonitor.reload: true
+      lagmonitor.clear: true
+      lagmonitor.scan: true
