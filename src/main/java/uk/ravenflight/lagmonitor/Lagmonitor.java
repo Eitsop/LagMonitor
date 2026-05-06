@@ -274,7 +274,7 @@ public class Lagmonitor extends JavaPlugin implements Listener {
             String tpFormat = player.getWorld().getName() + " " + player.getLocation().getBlockX() + " " + player.getLocation().getBlockY() + " " + player.getLocation().getBlockZ();
             int entitiesExcess = entityCount - maximumAllowed;
             String actionVerb = removed ? "Removed" : "Detected";
-            String fullReport = "[Lagmonitor] " + actionVerb + " " + entitiesExcess + " excess " + itemTypeName + "(s) near " + player.getName() + " at " + tpFormat;
+            String fullReport = actionVerb + " " + entitiesExcess + " excess " + itemTypeName + "(s) near " + player.getName() + " at " + tpFormat;
 
             getLogger().log(Level.WARNING, fullReport);
             if (this.reportToAdmins) {
