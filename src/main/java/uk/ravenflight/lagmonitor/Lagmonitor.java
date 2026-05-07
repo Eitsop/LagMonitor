@@ -15,6 +15,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.jspecify.annotations.NonNull;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
@@ -170,105 +173,128 @@ public class Lagmonitor extends JavaPlugin implements Listener {
     }
 
     private void performEntityScan(CommandSender sender, boolean forceRemove) {
-        int totalBoatsRemoved = 0;
-        int totalArmorRemoved = 0;
-        int totalMinecartsRemoved = 0;
+        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
+            AtomicInteger totalBoatsRemoved = new AtomicInteger(0);
+            AtomicInteger totalArmorRemoved = new AtomicInteger(0);
+            AtomicInteger totalMinecartsRemoved = new AtomicInteger(0);
 
-        boolean shouldRemove = forceRemove || this.scanAction.equals("REMOVE");
+            boolean shouldRemove = forceRemove || this.scanAction.equals("REMOVE");
 
-        Set<Entity> processedEntities = new HashSet<>();
-        
-        // Optimization: Global maps to track across all players and reduce allocations
-        Map<Long, Integer> blockBoats = new HashMap<>();
-        Map<Long, Integer> blockArmor = new HashMap<>();
-        Map<Long, Integer> blockMinecarts = new HashMap<>();
-        
-        // Optimization: Reuse location object to reduce GC pressure
-        org.bukkit.Location locHelper = new org.bukkit.Location(null, 0, 0, 0);
+            Set<Entity> processedEntities = Collections.newSetFromMap(new ConcurrentHashMap<>());
+            
+            // Optimization: Thread-safe maps for block-level counting
+            Map<Long, Integer> blockBoats = new ConcurrentHashMap<>();
+            Map<Long, Integer> blockArmor = new ConcurrentHashMap<>();
+            Map<Long, Integer> blockMinecarts = new ConcurrentHashMap<>();
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (sender != null) {
-                sender.sendMessage(MM.deserialize("<gold>Checking " + player.getName()));
-            }
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-            int currentScanX = this.scanXSize;
-            int currentScanZ = this.scanZSize;
-
-            if (this.useDynamicRadius) {
-                // Simulation distance is in chunks. 1 chunk = 16 blocks.
-                int simDistance = player.getWorld().getSimulationDistance();
-                currentScanX = (int) (simDistance * 16 * this.dynamicRadiusMultiplier);
-                currentScanZ = currentScanX; // Keep it square
-            }
-
-            // Optimization: Use predicate to let the engine filter by type
-            Collection<Entity> nearby = player.getWorld().getNearbyEntities(
-                player.getLocation(), 
-                currentScanX, this.scanYSize, currentScanZ,
-                entity -> entity instanceof Boat || entity instanceof ArmorStand || entity instanceof Minecart
-            );
-
-            int boatCount = 0;
-            int armorCount = 0;
-            int minecartCount = 0;
-
-            for (Entity entity : nearby) {
-                if (!processedEntities.add(entity)) continue;
-
-                entity.getLocation(locHelper);
-                long blockKey = getBlockKey(locHelper.getBlockX(), locHelper.getBlockY(), locHelper.getBlockZ());
-
-                switch (entity) {
-                    case Boat _ -> {
-                        boatCount++;
-                        int inBlock = blockBoats.getOrDefault(blockKey, 0) + 1;
-                        blockBoats.put(blockKey, inBlock);
-
-                        if (boatCount > this.maxBoats || (this.perBlockLimitEnabled && inBlock > this.maxBoatsPerBlock)) {
-                            if (shouldRemove) {
-                                entity.remove();
-                                totalBoatsRemoved++;
-                            }
-                        }
-                    }
-                    case ArmorStand _ -> {
-                        armorCount++;
-                        int inBlock = blockArmor.getOrDefault(blockKey, 0) + 1;
-                        blockArmor.put(blockKey, inBlock);
-
-                        if (armorCount > this.maxArmor || (this.perBlockLimitEnabled && inBlock > this.maxArmorPerBlock)) {
-                            if (shouldRemove) {
-                                entity.remove();
-                                totalArmorRemoved++;
-                            }
-                        }
-                    }
-                    case Minecart _ -> {
-                        minecartCount++;
-                        int inBlock = blockMinecarts.getOrDefault(blockKey, 0) + 1;
-                        blockMinecarts.put(blockKey, inBlock);
-
-                        if (minecartCount > this.maxMinecarts || (this.perBlockLimitEnabled && inBlock > this.maxMinecartsPerBlock)) {
-                            if (shouldRemove) {
-                                entity.remove();
-                                totalMinecartsRemoved++;
-                            }
-                        }
-                    }
-                    default -> {
-                    }
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (sender != null) {
+                    sender.sendMessage(MM.deserialize("<gold>Scheduling check for " + player.getName()));
                 }
+
+                int currentScanX = this.scanXSize;
+                int currentScanZ = this.scanZSize;
+
+                if (this.useDynamicRadius) {
+                    // Simulation distance is in chunks. 1 chunk = 16 blocks.
+                    int simDistance = player.getWorld().getSimulationDistance();
+                    currentScanX = (int) (simDistance * 16 * this.dynamicRadiusMultiplier);
+                    currentScanZ = currentScanX; // Keep it square
+                }
+
+                final int finalScanX = currentScanX;
+                final int finalScanZ = currentScanZ;
+
+                CompletableFuture<Void> future = new CompletableFuture<>();
+                futures.add(future);
+
+                Bukkit.getScheduler().runTask(this, () -> {
+                    try {
+                        if (!player.isOnline()) {
+                            future.complete(null);
+                            return;
+                        }
+
+                        // Optimization: Use predicate to let the engine filter by type
+                        Collection<Entity> nearby = player.getWorld().getNearbyEntities(
+                            player.getLocation(), 
+                            finalScanX, this.scanYSize, finalScanZ,
+                            entity -> entity instanceof Boat || entity instanceof ArmorStand || entity instanceof Minecart
+                        );
+
+                        int boatCount = 0;
+                        int armorCount = 0;
+                        int minecartCount = 0;
+
+                        org.bukkit.Location locHelper = new org.bukkit.Location(null, 0, 0, 0);
+
+                        for (Entity entity : nearby) {
+                            if (!processedEntities.add(entity)) continue;
+
+                            entity.getLocation(locHelper);
+                            long blockKey = getBlockKey(locHelper.getBlockX(), locHelper.getBlockY(), locHelper.getBlockZ());
+
+                            switch (entity) {
+                                case Boat _ -> {
+                                    boatCount++;
+                                    int inBlock = blockBoats.getOrDefault(blockKey, 0) + 1;
+                                    blockBoats.put(blockKey, inBlock);
+
+                                    if (boatCount > this.maxBoats || (this.perBlockLimitEnabled && inBlock > this.maxBoatsPerBlock)) {
+                                        if (shouldRemove) {
+                                            entity.remove();
+                                            totalBoatsRemoved.incrementAndGet();
+                                        }
+                                    }
+                                }
+                                case ArmorStand _ -> {
+                                    armorCount++;
+                                    int inBlock = blockArmor.getOrDefault(blockKey, 0) + 1;
+                                    blockArmor.put(blockKey, inBlock);
+
+                                    if (armorCount > this.maxArmor || (this.perBlockLimitEnabled && inBlock > this.maxArmorPerBlock)) {
+                                        if (shouldRemove) {
+                                            entity.remove();
+                                            totalArmorRemoved.incrementAndGet();
+                                        }
+                                    }
+                                }
+                                case Minecart _ -> {
+                                    minecartCount++;
+                                    int inBlock = blockMinecarts.getOrDefault(blockKey, 0) + 1;
+                                    blockMinecarts.put(blockKey, inBlock);
+
+                                    if (minecartCount > this.maxMinecarts || (this.perBlockLimitEnabled && inBlock > this.maxMinecartsPerBlock)) {
+                                        if (shouldRemove) {
+                                            entity.remove();
+                                            totalMinecartsRemoved.incrementAndGet();
+                                        }
+                                    }
+                                }
+                                default -> {
+                                }
+                            }
+                        }
+
+                        reportStatusIfNeeded(sender, player, this.maxBoats, boatCount, "boat", shouldRemove);
+                        reportStatusIfNeeded(sender, player, this.maxArmor, armorCount, "armor", shouldRemove);
+                        reportStatusIfNeeded(sender, player, this.maxMinecarts, minecartCount, "minecart", shouldRemove);
+                    } finally {
+                        future.complete(null);
+                    }
+                });
             }
 
-            reportStatusIfNeeded(sender, player, this.maxBoats, boatCount, "boat", shouldRemove);
-            reportStatusIfNeeded(sender, player, this.maxArmor, armorCount, "armor", shouldRemove);
-            reportStatusIfNeeded(sender, player, this.maxMinecarts, minecartCount, "minecart", shouldRemove);
-        }
+            // Wait for all player-vicinity scans to complete
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
-        if (sender != null) {
-            String actionVerb = shouldRemove ? "removed" : "detected";
-            sender.sendMessage(MM.deserialize("<green>Scan complete. " + totalBoatsRemoved + " boats, " + totalArmorRemoved + " armor stands, and " + totalMinecartsRemoved + " minecarts " + actionVerb + "."));
-        }
+            if (sender != null) {
+                String actionVerb = shouldRemove ? "removed" : "detected";
+                sender.sendMessage(MM.deserialize("<green>Scan complete. " + totalBoatsRemoved.get() + " boats, " + totalArmorRemoved.get() + " armor stands, and " + totalMinecartsRemoved.get() + " minecarts " + actionVerb + "."));
+            }
+        });
     }
 
     private void reportStatusIfNeeded(CommandSender sender, Player player, int maximumAllowed, int entityCount, String itemTypeName, boolean removed) {
