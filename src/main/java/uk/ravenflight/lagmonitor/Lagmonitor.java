@@ -137,7 +137,9 @@ public class Lagmonitor extends JavaPlugin implements Listener {
     private void handleProactiveBlock(Entity entity, String type) {
         if (this.reportBlocksToAdmins) {
             String location = entity.getWorld().getName() + " " + entity.getLocation().getBlockX() + " " + entity.getLocation().getBlockY() + " " + entity.getLocation().getBlockZ();
-            notifyAdmins("Blocked " + type + " placement at " + location);
+            String message = "Blocked " + type + " placement at " + location;
+            getLogger().warning(message);
+            notifyAdmins(message);
         }
     }
 
@@ -357,7 +359,6 @@ public class Lagmonitor extends JavaPlugin implements Listener {
     }
 
     private void notifyAdmins(String message) {
-        getLogger().info(message);
         Component component = MM.deserialize("<red>[LagMonitor] <yellow>" + message);
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (player.hasPermission("lagmonitor.notify")) {
