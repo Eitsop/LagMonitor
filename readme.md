@@ -12,10 +12,10 @@ Minimum Java Version: Java 21
 
 Recommended Java Version: Java 25
 
-Lagmonitor checks for placed **Boats**, **Armor Stands** and **Minecarts** within an area around a player and as they are placed, to help prevent lag through cramming and general abuse.
+Asynchronous Lagmonitor checks for placed **Boats**, **Armor Stands** and **Minecarts** within an area around a player and as they are placed, to help prevent lag through cramming and general abuse.
 
 ## Features
-* Automated scan of a defined area around a player for a maximum number of entities.
+* Automated asynchronous scan of a defined area around a player for a maximum number of entities.
 * Separate configuration options for different supported entities.
 * Checks when entity is placed.
 * Ability to scale the scan to match a % of the simulation distance.
